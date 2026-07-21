@@ -22,10 +22,26 @@ from pathlib import Path
 from datetime import datetime
 
 HOME = Path.home()
-CLAUDE_DIR = HOME / ".claude"
-FILES = [CLAUDE_DIR / ".credentials.json", CLAUDE_DIR / ".last-cleanup", HOME / ".claude.json"]
+# Ubicación de la sesión: respeta CLAUDE_CONFIG_DIR (reubica .claude/ en Linux/Windows).
+CLAUDE_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR", HOME / ".claude"))
 CRED = CLAUDE_DIR / ".credentials.json"
-DEST = Path(os.environ.get("CLAUDE_BACKUP_DIR", HOME / "claude-backups"))
+FILES = [CRED, CLAUDE_DIR / ".last-cleanup", HOME / ".claude.json"]
+
+# Destino de los respaldos: env > config guardada por la GUI > por defecto.
+CONFIG_FILE = HOME / ".config" / "claude-session-guard" / "config.json"
+
+def _load_backup_dir():
+    if os.environ.get("CLAUDE_BACKUP_DIR"):
+        return Path(os.environ["CLAUDE_BACKUP_DIR"])
+    try:
+        c = json.loads(CONFIG_FILE.read_text())
+        if c.get("backup_dir"):
+            return Path(c["backup_dir"]).expanduser()
+    except Exception:
+        pass
+    return HOME / "claude-backups"
+
+DEST = _load_backup_dir()
 KEEP = int(os.environ.get("KEEP", "50"))
 RESTORE_ON_LOSS = os.environ.get("RESTORE_ON_LOSS", "0") == "1"
 # El refreshToken solo se renueva al arrancar Claude; si no lo abres varios días
@@ -57,6 +73,28 @@ def _lockdown(p):
     try:
         if os.name == "posix":
             os.chmod(p, 0o700 if Path(p).is_dir() else 0o600)
+    except Exception:
+        pass
+
+def _set_dest(path):
+    """Reapunta el destino de respaldos en caliente (lo usa la GUI al elegir carpeta)."""
+    global DEST, PIDFILE, HASHFILE, REFRESHFILE
+    DEST = Path(path)
+    PIDFILE = DEST / ".watch.pid"
+    HASHFILE = DEST / ".last-hash"
+    REFRESHFILE = DEST / ".last-refresh"
+
+def _sync_from_keychain():
+    """macOS: el token puede vivir en el Keychain (con el archivo borrado). Lo materializa
+    en CRED para poder respaldarlo; Claude lee ese archivo como fallback."""
+    if platform.system() != "Darwin" or CRED.exists():
+        return
+    try:
+        r = subprocess.run(["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
+                           capture_output=True, text=True)
+        if r.returncode == 0 and r.stdout.strip():
+            CRED.parent.mkdir(parents=True, exist_ok=True)
+            CRED.write_text(r.stdout.strip()); _lockdown(CRED)
     except Exception:
         pass
 
@@ -164,6 +202,7 @@ def _snapshot_into(d, files, stamp):
 
 # ---------- comandos ----------
 def backup():
+    _sync_from_keychain()
     stamp = _stamp()
     _lockdown(DEST)
     saved = _snapshot_into(DEST / stamp, FILES, stamp)
@@ -179,7 +218,11 @@ def restore(src=None, creds_only=False):
     targets = [CRED] if creds_only else FILES
     # red de seguridad: respalda el estado ACTUAL antes de pisar (restore reversible)
     undo_stamp = _stamp()
-    _snapshot_into(DEST / "_restore_undo" / undo_stamp, targets, undo_stamp)
+    undo_root = DEST / "_restore_undo"
+    _snapshot_into(undo_root / undo_stamp, targets, undo_stamp)
+    undos = sorted(p for p in undo_root.iterdir() if p.is_dir()) if undo_root.exists() else []
+    for old in undos[:-5]:          # conserva solo las últimas 5 marchas atrás
+        shutil.rmtree(old, ignore_errors=True)
     done = []
     for f in targets:
         enc = sorted(d.glob(f"*{f.name}.enc"))
@@ -197,6 +240,7 @@ def restore(src=None, creds_only=False):
             f"(estado previo guardado en _restore_undo/{undo_stamp} — deshacer: restore ese dir)")
 
 def check():
+    _sync_from_keychain()
     if token_ok():
         h = hashlib.sha256(CRED.read_bytes()).hexdigest()
         last = HASHFILE.read_text().strip() if HASHFILE.exists() else ""
@@ -308,7 +352,7 @@ def stop_watcher():
 def gui():
     import threading
     import tkinter as tk
-    from tkinter import messagebox
+    from tkinter import messagebox, filedialog
 
     BG, PANEL, FG, MUTED = "#16161e", "#1e1e2a", "#e6e6ea", "#8a8a9a"
     ACCENT, DARK, GREEN, RED = "#d97757", "#33333f", "#7fd88f", "#e06c75"
@@ -371,6 +415,18 @@ def gui():
             root.after(0, lambda: setmsg(("✓ " if ok else "✗ ") + detail, err=not ok))
         threading.Thread(target=work, daemon=True).start()
 
+    def change_dir():
+        d = filedialog.askdirectory(title="Elegir carpeta de respaldos", initialdir=str(DEST))
+        if not d:
+            return
+        stop_watcher()                                  # parar con el PIDFILE viejo
+        CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        CONFIG_FILE.write_text(json.dumps({"backup_dir": d}))
+        _set_dest(d)                                    # reapuntar en esta ventana
+        start_watcher()                                 # el watcher nuevo lee la config
+        setmsg(f"Carpeta de respaldos: {d}")
+        root.after(700, refresh)
+
     def open_folder():
         DEST.mkdir(parents=True, exist_ok=True)
         if platform.system() == "Windows":
@@ -396,7 +452,8 @@ def gui():
         st_watch.config(text=f"{dot}  {txt}", fg=col)
         bks = backups()
         last = bks[-1].name.replace("_", "  ") if bks else "—"
-        st_info.config(text=f"Último respaldo:   {last}\nCopias guardadas:  {len(bks)}")
+        folder = str(DEST).replace(str(HOME), "~")
+        st_info.config(text=f"Último respaldo:   {last}\nCopias guardadas:  {len(bks)}\nCarpeta:  {folder}")
         btn_watch.config(text="Detener vigilancia" if active else "Iniciar vigilancia")
         box["after"] = root.after(4000, refresh)
 
@@ -404,6 +461,7 @@ def gui():
     mkbtn("Probar / renovar token", DARK, do_keepalive)
     mkbtn("Restaurar el último", DARK, do_restore)
     mkbtn("Abrir carpeta de respaldos", DARK, open_folder)
+    mkbtn("Cambiar carpeta de respaldos…", DARK, change_dir)
     btn_watch = mkbtn("", DARK, toggle_watch)
     msg.pack(anchor="w", pady=(12, 0))
 

@@ -63,9 +63,11 @@ menu for a one-click dashboard.
   <img src="assets/screenshot.png" width="300" alt="Claude Session Guard app">
 </p>
 
-A tiny dark window: watcher status, last backup, snapshot count, and one-click
-actions — **Back up now** · **Test / renew token** · **Restore latest** ·
-**Open backups folder** · **Start/Stop watcher**.
+A tiny dark window: watcher status, last backup, snapshot count, backup folder,
+and one-click actions — **Back up now** · **Test / renew token** ·
+**Restore latest** · **Open backups folder** · **Change backup folder…** ·
+**Start/Stop watcher**. Pick a Drive/USB folder right from the app — no env
+vars needed.
 
 Prefer the terminal?
 
@@ -151,9 +153,19 @@ on the command line.
   Claude session resets the timer. Uses the cheapest model and a one-word prompt.
 - **Notifications**: `notify-send` (Linux), `osascript` (macOS), a PowerShell
   balloon (Windows). Everything is also appended to `~/claude-backups/guard.log`.
-- **macOS caveat**: Claude Code may keep the OAuth token in the **login Keychain**
-  instead of a file. When there's no `.credentials.json`, only `~/.claude.json`
-  config is backed up; Keychain credentials are out of scope for now.
+- **Credential storage** (per Claude Code docs): a file on **Linux**
+  (`~/.claude/.credentials.json`) and **Windows**
+  (`%USERPROFILE%\.claude\.credentials.json`), and the **login Keychain** on
+  **macOS**. `CLAUDE_CONFIG_DIR` relocates it, and Guard honors that too.
+- **macOS**: the token is in the Keychain, but Claude reads
+  `~/.claude/.credentials.json` as a fallback when present. So **restore works**
+  (Guard writes that file) and **backup** pulls the token from the Keychain via
+  `security find-generic-password -s "Claude Code-credentials"`.
+- **Backup destination** comes from `CLAUDE_BACKUP_DIR`, else the folder picked
+  in the app (saved to `~/.config/claude-session-guard/config.json`), else
+  `~/claude-backups`.
+- *Windows and macOS run the same code as Linux but haven't been tested on real
+  hardware yet — reports welcome.*
 - Pure Python stdlib: `guard.py` (engine + CLI + GUI), `install.py` / `uninstall.py`.
 
 </details>

@@ -52,9 +52,13 @@ menu for a one-click dashboard.
 
 ## The app
 
-<p align="center"><i>A tiny dark window: status, last backup, and one-click actions.</i></p>
+<p align="center">
+  <img src="assets/screenshot.png" width="300" alt="Claude Session Guard app">
+</p>
 
-Buttons: **Back up now** · **Test / renew token** · **Restore latest** · **Open backups folder** · **Start/Stop watcher**.
+A tiny dark window: watcher status, last backup, snapshot count, and one-click
+actions — **Back up now** · **Test / renew token** · **Restore latest** ·
+**Open backups folder** · **Start/Stop watcher**.
 
 Prefer the terminal?
 
@@ -66,11 +70,27 @@ python3 guard.py keepalive  # renew + test the token now
 python3 guard.py watch 60   # foreground watcher
 ```
 
-## Move a session to a new machine
+## Log in on another machine
 
-1. Copy your `~/claude-backups/` folder to the new computer (USB, Drive, `scp`…).
-2. Run `python3 guard.py restore`.
-3. Restart Claude Code. Done — no re-login.
+Your session lives in `~/claude-backups/`. Get that folder onto the other
+computer (USB, Google Drive, `scp`, or point `CLAUDE_BACKUP_DIR` at a synced
+folder from the start), then:
+
+**A) A machine that never had Claude Code**
+1. Install Claude Code — see the [official docs](https://docs.claude.com/en/docs/claude-code/overview). *(You don't need to log in.)*
+2. Get this repo there (`git clone` or copy) and drop your `~/claude-backups/` next to your home.
+3. Run `python3 guard.py restore`.
+4. Start Claude Code — you're already signed in. No browser, no code.
+
+**B) A machine that has Claude but the session closed / expired**
+1. Make sure `~/claude-backups/` is present (or synced).
+2. `python3 guard.py restore`
+3. Restart Claude Code. Done.
+
+> **The date is dropped on restore, automatically.** Backups are stored dated
+> (`2026-07-21_085355_.credentials.json`) but `restore` writes them back to
+> their real names — `~/.claude/.credentials.json`, `~/.claude/.last-cleanup`,
+> `~/.claude.json` — which is what Claude actually reads. You don't rename anything.
 
 ## Options (environment variables)
 

@@ -63,11 +63,17 @@ menu for a one-click dashboard.
   <img src="assets/screenshot.png" width="300" alt="Claude Session Guard app">
 </p>
 
-A tiny dark window: watcher status, last backup, snapshot count, backup folder,
-and one-click actions — **Back up now** · **Test / renew token** ·
-**Restore latest** · **Open backups folder** · **Change backup folder…** ·
-**Start/Stop watcher**. Pick a Drive/USB folder right from the app — no env
-vars needed.
+A tiny dark window showing watcher status, last backup, snapshot count and the
+backup folder, with one-click actions:
+
+| Button | What it does |
+|---|---|
+| **Back up now** | Save a snapshot immediately (without waiting for the 60s cycle). |
+| **Test / renew token** | Run `claude -p` headless to refresh the token and confirm it still works (✓ / ✗). |
+| **Restore latest** | Overwrite the current session with the newest backup. Reversible — it saves the current state first — and asks to confirm. |
+| **Open backups folder** | Open `~/claude-backups/` in your file manager. |
+| **Change backup folder…** | Pick where backups are saved (a Drive/USB folder) — applied right away, no env vars. |
+| **Start / Stop watcher** | Turn the background watcher on or off. |
 
 Prefer the terminal?
 

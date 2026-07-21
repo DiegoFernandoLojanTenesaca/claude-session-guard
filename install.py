@@ -26,9 +26,24 @@ def linux():
         d.mkdir(parents=True, exist_ok=True)
     icon = icons / "claude-session-guard.svg"
     shutil.copy2(ICON, icon)
-    # wrapper en el PATH: da el comando `claude-guard` y desacopla el .desktop del python
+    # wrapper en el PATH: da el comando `claude-guard` y desacopla el .desktop del python.
+    # Además recupera el entorno gráfico: en Wayland el menú a veces NO pasa XAUTHORITY,
+    # y Tk (X/XWayland) no puede conectar al display -> la GUI "no abre" al hacer clic.
     launcher = bindir / "claude-guard"
-    launcher.write_text(f'#!/usr/bin/env bash\nexec "{PY}" "{GUARD}" "$@"\n')
+    launcher.write_text(
+        "#!/usr/bin/env bash\n"
+        'for v in DISPLAY WAYLAND_DISPLAY XAUTHORITY; do\n'
+        '  if [ -z "${!v}" ]; then\n'
+        '    val=$(systemctl --user show-environment 2>/dev/null | sed -n "s/^$v=//p")\n'
+        '    [ -n "$val" ] && export "$v=$val"\n'
+        '  fi\n'
+        'done\n'
+        'if [ -z "$XAUTHORITY" ]; then\n'
+        '  xa=$(ls -t "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"/.mutter-Xwaylandauth.* 2>/dev/null | head -1)\n'
+        '  [ -n "$xa" ] && export XAUTHORITY="$xa"\n'
+        'fi\n'
+        '[ -z "$DISPLAY" ] && export DISPLAY=:0\n'
+        f'exec "{PY}" "{GUARD}" "$@"\n')
     launcher.chmod(0o755)
     (apps / "claude-session-guard.desktop").write_text(
         "[Desktop Entry]\nType=Application\nName=Claude Session Guard\n"

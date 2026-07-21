@@ -7,6 +7,13 @@
 <p align="center"><b>Your Claude Code session — backed up, watched, and kept alive.</b><br>
 Never get logged out on a new machine again. &nbsp;·&nbsp; Linux · macOS · Windows</p>
 
+<p align="center">
+  <a href="https://github.com/DiegoFernandoLojanTenesaca/claude-session-guard/actions/workflows/ci.yml"><img src="https://github.com/DiegoFernandoLojanTenesaca/claude-session-guard/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/platform-Linux%20%C2%B7%20macOS%20%C2%B7%20Windows-blue" alt="platform">
+  <img src="https://img.shields.io/badge/deps-none-brightgreen" alt="no dependencies">
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT">
+</p>
+
 ---
 
 Every time you open Claude Code it rotates the OAuth token in your home folder.
@@ -63,12 +70,18 @@ actions — **Back up now** · **Test / renew token** · **Restore latest** ·
 Prefer the terminal?
 
 ```bash
-python3 guard.py            # GUI
-python3 guard.py backup     # snapshot now
-python3 guard.py restore    # restore latest (e.g. on a new PC)
-python3 guard.py keepalive  # renew + test the token now
-python3 guard.py watch 60   # foreground watcher
+python3 guard.py               # GUI
+python3 guard.py backup        # snapshot now
+python3 guard.py restore       # restore latest (e.g. on a new PC)
+python3 guard.py restore --creds-only   # only the token — leaves .claude.json untouched
+python3 guard.py keepalive     # renew + test the token now
+python3 guard.py watch 60      # foreground watcher
 ```
+
+> **Restore is reversible.** Before overwriting, it saves your current state to
+> `~/claude-backups/_restore_undo/<timestamp>/`. Undo with `restore <that dir>`.
+> Restoring on the **same** machine? Use `--creds-only` so it only brings the
+> token back and leaves your current `~/.claude.json` (projects, MCP) alone.
 
 ## Log in on another machine
 
@@ -102,12 +115,20 @@ folder from the start), then:
 | `REFRESH_EVERY` | `172800` | seconds of inactivity before a keepalive runs (2 days) |
 | `KEEPALIVE_MODEL` | `haiku` | model used for the keepalive ping (cheapest) |
 | `CLAUDE_BIN` | auto | override the Claude CLI location |
+| `CLAUDE_BACKUP_PASSPHRASE` | — | if set, every snapshot is **encrypted** (see below) |
 
 ## Security
 
 Backups contain your OAuth tokens — treat them like the key to your account. The
 tool keeps the backup dir `700` and files `600`. If you point `CLAUDE_BACKUP_DIR`
 at a cloud-synced folder, your tokens go to that cloud — your call.
+
+**Optional encryption.** Set `CLAUDE_BACKUP_PASSPHRASE` and every snapshot is
+encrypted with `openssl` (AES-256-CBC, PBKDF2) — safe to sync to Drive/Dropbox.
+Restore needs the same passphrase; without it, an encrypted backup won't restore.
+Requires the `openssl` CLI (standard on Linux/macOS; on Windows it ships with
+Git for Windows). The passphrase is passed to openssl via the environment, never
+on the command line.
 
 <details>
 <summary><b>Technical details</b> (for the curious)</summary>

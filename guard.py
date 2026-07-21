@@ -33,6 +33,8 @@ RESTORE_ON_LOSS = os.environ.get("RESTORE_ON_LOSS", "0") == "1"
 REFRESH_EVERY = int(os.environ.get("REFRESH_EVERY", str(2 * 24 * 3600)))  # cada 2 días
 KEEPALIVE_MODEL = os.environ.get("KEEPALIVE_MODEL", "haiku")
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN") or shutil.which("claude") or str(HOME / ".local/bin/claude")
+# Cifrado opcional: si defines CLAUDE_BACKUP_PASSPHRASE, cada snapshot se cifra con openssl.
+PASSPHRASE = os.environ.get("CLAUDE_BACKUP_PASSPHRASE")
 PIDFILE = DEST / ".watch.pid"
 HASHFILE = DEST / ".last-hash"
 REFRESHFILE = DEST / ".last-refresh"
@@ -92,7 +94,10 @@ def token_ok():
         return False
 
 def backups():
-    return sorted(p for p in DEST.iterdir() if p.is_dir()) if DEST.exists() else []
+    # solo carpetas con nombre de fecha (AAAA...) -> excluye _restore_undo, .watch.pid, etc.
+    if not DEST.exists():
+        return []
+    return sorted(p for p in DEST.iterdir() if p.is_dir() and p.name[:4].isdigit())
 
 def _last_refresh():
     try:
@@ -123,35 +128,73 @@ def keepalive():
         return False, str(e)[:200]
 
 
+# ---------- cifrado opcional (openssl, sin dependencias pip) ----------
+def _openssl():
+    return shutil.which("openssl")
+
+def _need_openssl():
+    if PASSPHRASE and not _openssl():
+        raise RuntimeError("cifrado pedido (CLAUDE_BACKUP_PASSPHRASE) pero falta 'openssl' en el PATH")
+
+def _encrypt(src, dst):   # passphrase via env, NO en argv
+    subprocess.run([_openssl(), "enc", "-aes-256-cbc", "-pbkdf2", "-salt",
+                    "-in", str(src), "-out", str(dst), "-pass", "env:CLAUDE_BACKUP_PASSPHRASE"],
+                   check=True, capture_output=True)
+
+def _decrypt(src, dst):
+    subprocess.run([_openssl(), "enc", "-d", "-aes-256-cbc", "-pbkdf2",
+                    "-in", str(src), "-out", str(dst), "-pass", "env:CLAUDE_BACKUP_PASSPHRASE"],
+                   check=True, capture_output=True)
+
+def _snapshot_into(d, files, stamp):
+    """Copia (o cifra) los `files` dentro de `d` con nombre `stamp_nombre[.enc]`. Devuelve #guardados."""
+    _need_openssl()
+    d.mkdir(parents=True, exist_ok=True); _lockdown(d)
+    n = 0
+    for f in files:
+        if not f.exists():
+            continue
+        if PASSPHRASE:
+            dst = d / f"{stamp}_{f.name}.enc"; _encrypt(f, dst)
+        else:
+            dst = d / f"{stamp}_{f.name}"; shutil.copy2(f, dst)
+        _lockdown(dst); n += 1
+    return n
+
+
 # ---------- comandos ----------
 def backup():
     stamp = _stamp()
-    d = DEST / stamp
-    d.mkdir(parents=True, exist_ok=True)
-    _lockdown(DEST); _lockdown(d)
-    saved = 0
-    for f in FILES:
-        if f.exists():
-            dst = d / f"{stamp}_{f.name}"
-            shutil.copy2(f, dst); _lockdown(dst); saved += 1
-    # purga a las últimas KEEP copias
-    for old in backups()[:-KEEP]:
+    _lockdown(DEST)
+    saved = _snapshot_into(DEST / stamp, FILES, stamp)
+    for old in backups()[:-KEEP]:          # purga a las últimas KEEP copias
         shutil.rmtree(old, ignore_errors=True)
-    return f"Respaldo en: {d.name}  ({saved} archivos)"
+    tag = " 🔒" if PASSPHRASE else ""
+    return f"Respaldo en: {stamp}  ({saved} archivos){tag}"
 
-def restore(src=None):
+def restore(src=None, creds_only=False):
     d = Path(src) if src else (backups()[-1] if backups() else None)
     if not d or not d.is_dir():
         raise RuntimeError(f"no hay respaldos en {DEST}")
+    targets = [CRED] if creds_only else FILES
+    # red de seguridad: respalda el estado ACTUAL antes de pisar (restore reversible)
+    undo_stamp = _stamp()
+    _snapshot_into(DEST / "_restore_undo" / undo_stamp, targets, undo_stamp)
     done = []
-    for f in FILES:
-        matches = sorted(d.glob(f"*{f.name}"))
-        if matches:
-            f.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(matches[0], f); done.append(f.name)
+    for f in targets:
+        enc = sorted(d.glob(f"*{f.name}.enc"))
+        plain = sorted(d.glob(f"*{f.name}"))
+        f.parent.mkdir(parents=True, exist_ok=True)
+        if enc:
+            if not PASSPHRASE:
+                raise RuntimeError("el respaldo está cifrado; define CLAUDE_BACKUP_PASSPHRASE para restaurar")
+            _decrypt(enc[0], f); done.append(f.name)
+        elif plain:
+            shutil.copy2(plain[0], f); done.append(f.name)
     if not done:
         raise RuntimeError(f"la carpeta {d.name} no tiene copias reconocibles")
-    return f"Restaurado desde {d.name}: {', '.join(done)}. Reinicia Claude Code."
+    return (f"Restaurado desde {d.name}: {', '.join(done)}. Reinicia Claude Code.\n"
+            f"(estado previo guardado en _restore_undo/{undo_stamp} — deshacer: restore ese dir)")
 
 def check():
     if token_ok():
@@ -310,7 +353,8 @@ def gui():
 
     def do_restore():
         if not messagebox.askyesno("Restaurar",
-                "Esto sobrescribe tus credenciales actuales con la última copia.\n"
+                "Esto sobrescribe tu sesión actual con la última copia.\n"
+                "Se guarda una copia del estado actual por si acaso (reversible).\n"
                 "Reinicia Claude Code después. ¿Continuar?"):
             return
         try:
@@ -384,7 +428,10 @@ def main():
         elif cmd == "backup":
             print(backup())
         elif cmd == "restore":
-            print(restore(sys.argv[2] if len(sys.argv) > 2 else None))
+            rest = sys.argv[2:]
+            creds_only = "--creds-only" in rest
+            dirs = [a for a in rest if not a.startswith("-")]
+            print(restore(dirs[0] if dirs else None, creds_only=creds_only))
         elif cmd == "check":
             check()
         elif cmd == "keepalive":
@@ -394,7 +441,8 @@ def main():
         elif cmd == "watch":
             watch(int(sys.argv[2]) if len(sys.argv) > 2 else 60)
         else:
-            print("uso: guard.py [gui|backup|restore [dir]|watch [seg]|check]", file=sys.stderr)
+            print("uso: guard.py [gui|backup|restore [dir] [--creds-only]|keepalive|watch [seg]|check]",
+                  file=sys.stderr)
             sys.exit(1)
     except RuntimeError as e:
         print(e, file=sys.stderr)

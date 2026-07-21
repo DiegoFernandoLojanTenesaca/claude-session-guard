@@ -12,7 +12,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 GUARD = HERE / "guard.py"
-ICON = HERE / "claude-session-guard.svg"
+ICON = HERE / "assets" / "logo.svg"
 PY = sys.executable
 HOME = Path.home()
 

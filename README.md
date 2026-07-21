@@ -143,6 +143,14 @@ at a cloud-synced folder, your tokens go to that cloud — your call.
 python3 uninstall.py   # keeps your backups
 ```
 
+## Credits
+
+Built by [@DiegoFernandoLojanTenesaca](https://github.com/DiegoFernandoLojanTenesaca).
+The keepalive idea — and the nudge to build this — came from
+[@jahirxtrap](https://github.com/jahirxtrap), author of
+[**cconnect**](https://github.com/jahirxtrap/cconnect), a mobile / desktop / web
+client for Claude Code.
+
 ## License
 
 MIT

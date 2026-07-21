@@ -1,2 +1,5 @@
 __pycache__/
 *.pyc
+
+# guía local, no publicar
+docs/RECUPERAR-SESION-WINDOWS.md

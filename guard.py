@@ -66,7 +66,18 @@ def notify(msg):
         elif s == "Darwin":
             subprocess.run(["osascript", "-e",
                             f'display notification "{msg}" with title "Claude Session Guard"'], check=False)
-        else:  # Windows u otros: sin toast garantizado, queda en el log
+        elif s == "Windows":
+            safe = msg.replace("'", " ")
+            ps = ("[reflection.assembly]::LoadWithPartialName('System.Windows.Forms')|Out-Null;"
+                  "[reflection.assembly]::LoadWithPartialName('System.Drawing')|Out-Null;"
+                  "$n=New-Object System.Windows.Forms.NotifyIcon;"
+                  "$n.Icon=[System.Drawing.SystemIcons]::Warning;$n.Visible=$true;"
+                  f"$n.ShowBalloonTip(8000,'Claude Session Guard','{safe}',"
+                  "[System.Windows.Forms.ToolTipIcon]::Warning);Start-Sleep -Seconds 9;$n.Dispose()")
+            # no bloqueante: no esperamos los 9s
+            subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps],
+                             creationflags=0x08000000)  # CREATE_NO_WINDOW
+        else:
             print("AVISO:", msg)
     except Exception:
         print("AVISO:", msg)
@@ -159,11 +170,27 @@ def check():
             except Exception as e:
                 _log(f"auto-restore falló: {e}")
 
-def watch(interval=60):
-    if watcher_pid():
-        print("ya hay un watcher corriendo"); return
+def _claim_pidfile():
+    """Candado atómico: O_EXCL falla si ya existe. Si el dueño está muerto, lo reemplaza.
+    Devuelve True si este proceso queda como watcher único."""
     DEST.mkdir(parents=True, exist_ok=True)
-    PIDFILE.write_text(str(os.getpid()))
+    for _ in range(2):
+        try:
+            fd = os.open(str(PIDFILE), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            os.write(fd, str(os.getpid()).encode()); os.close(fd)
+            return True
+        except FileExistsError:
+            if watcher_pid():          # hay otro watcher vivo
+                return False
+            try:                        # pidfile huérfano (proceso muerto) -> reintentar
+                PIDFILE.unlink()
+            except Exception:
+                pass
+    return False
+
+def watch(interval=60):
+    if not _claim_pidfile():
+        print("ya hay un watcher corriendo"); return
     signal.signal(signal.SIGTERM, lambda *_: (_cleanpid(), sys.exit(0)))
     print(f"Vigilando {CRED} cada {interval}s. Destino: {DEST}")
     try:
@@ -244,7 +271,7 @@ def gui():
     ACCENT, DARK, GREEN, RED = "#d97757", "#33333f", "#7fd88f", "#e06c75"
     F = "TkDefaultFont"
 
-    root = tk.Tk()
+    root = tk.Tk(className="claude-session-guard")
     root.title("Claude Session Guard")
     root.configure(bg=BG)
     root.resizable(False, False)
@@ -337,6 +364,15 @@ def gui():
     msg.pack(anchor="w", pady=(12, 0))
 
     refresh()
+    # asegurar que la ventana salga al frente y con foco (no detrás de otras)
+    root.update_idletasks()
+    root.lift()
+    root.attributes("-topmost", True)
+    root.after(600, lambda: root.attributes("-topmost", False))
+    try:
+        root.focus_force()
+    except Exception:
+        pass
     root.mainloop()
 
 

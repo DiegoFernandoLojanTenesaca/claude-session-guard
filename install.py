@@ -21,17 +21,25 @@ def linux():
     apps = HOME / ".local/share/applications"
     icons = HOME / ".local/share/icons"
     autostart = HOME / ".config/autostart"
-    for d in (apps, icons, autostart):
+    bindir = HOME / ".local/bin"
+    for d in (apps, icons, autostart, bindir):
         d.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(ICON, icons / "claude-session-guard.svg")
+    icon = icons / "claude-session-guard.svg"
+    shutil.copy2(ICON, icon)
+    # wrapper en el PATH: da el comando `claude-guard` y desacopla el .desktop del python
+    launcher = bindir / "claude-guard"
+    launcher.write_text(f'#!/usr/bin/env bash\nexec "{PY}" "{GUARD}" "$@"\n')
+    launcher.chmod(0o755)
     (apps / "claude-session-guard.desktop").write_text(
         "[Desktop Entry]\nType=Application\nName=Claude Session Guard\n"
         "Comment=Respalda y vigila tu sesión de Claude Code\n"
-        f"Exec={PY} {GUARD}\nIcon={icons/'claude-session-guard.svg'}\n"
-        "Terminal=false\nCategories=Utility;\n")
+        f"Exec={launcher} %u\nTryExec={launcher}\nIcon={icon}\n"
+        "Terminal=false\nStartupNotify=false\nStartupWMClass=claude-session-guard\n"
+        "Keywords=claude;token;backup;session;respaldo;\nCategories=Utility;\n")
     (autostart / "claude-session-guard.desktop").write_text(
         "[Desktop Entry]\nType=Application\nName=Claude Session Guard Watcher\n"
-        f"Exec={PY} {GUARD} watch\nTerminal=false\nX-GNOME-Autostart-enabled=true\n")
+        f"Exec={PY} {GUARD} watch\nTerminal=false\nStartupNotify=false\n"
+        "X-GNOME-Autostart-enabled=true\n")
     subprocess.run(["update-desktop-database", str(apps)], capture_output=True)
 
 

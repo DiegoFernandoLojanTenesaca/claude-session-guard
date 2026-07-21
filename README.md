@@ -89,6 +89,9 @@ Your session lives in `~/claude-backups/`. Get that folder onto the other
 computer (USB, Google Drive, `scp`, or point `CLAUDE_BACKUP_DIR` at a synced
 folder from the start), then:
 
+> 🪟 **On Windows and not into terminals?** There's a click-by-click beginner
+> guide (Spanish): [docs/RECUPERAR-SESION-WINDOWS.md](docs/RECUPERAR-SESION-WINDOWS.md).
+
 **A) A machine that never had Claude Code**
 1. Install Claude Code — see the [official docs](https://docs.claude.com/en/docs/claude-code/overview). *(You don't need to log in.)*
 2. Get this repo there (`git clone` or copy) and drop your `~/claude-backups/` next to your home.
